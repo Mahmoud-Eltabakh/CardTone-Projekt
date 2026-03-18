@@ -1,0 +1,12 @@
+[submodule "cardtone-kid"]
+	path = cardtone-kid
+	url = https://github.com/Mahmoud-Eltabakh/CardTone-Kid.git
+[submodule "cardtone-parent"]
+	path = cardtone-parent
+	url = https://github.com/Mahmoud-Eltabakh/CardTone-Parent.git
+[submodule "cardtone-box"]
+	path = cardtone-box
+	url = https://github.com/Mahmoud-Eltabakh/CardTone-Box.git
+[submodule "cardtone-website"]
+	path = cardtone-website
+	url = https://github.com/Mahmoud-Eltabakh/CardTone-Website.git
