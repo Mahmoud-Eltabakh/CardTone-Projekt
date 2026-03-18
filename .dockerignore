@@ -1,0 +1,33 @@
+# Exclude everything by default, then whitelist only what Docker needs.
+# This keeps the build context small and fast.
+
+# Secrets — never send to Docker daemon
+.env
+*.env
+**/key.properties
+**/*.jks
+
+# Flutter / Android build outputs
+**/build/
+**/.dart_tool/
+**/.pub-cache/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+
+# Editor / OS noise
+**/.idea/
+**/.vscode/
+**/*.iml
+.DS_Store
+Thumbs.db
+
+# Git
+**/.git/
+**/.gitignore
+
+# KiCad (not needed for Docker builds)
+cardtone-box/
+
+# APKs (large, not needed as build input)
+**/*.apk
+**/*.aab

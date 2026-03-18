@@ -1,0 +1,75 @@
+# CardTone — Docker Compose for contributors
+#
+# Prerequisites:
+#   1. cp .env.example .env  →  fill in your Supabase credentials
+#   2. docker compose build  →  build the Flutter image (one-time, ~10 min)
+#
+# Common commands:
+#   docker compose run --rm kid    flutter pub get
+#   docker compose run --rm parent flutter pub get
+#   docker compose run --rm kid    flutter test
+#   docker compose run --rm parent flutter test
+#   docker compose run --rm kid    flutter analyze
+#   docker compose run --rm kid    flutter build apk --debug
+#   docker compose run --rm kid    ./build_release.sh     # release with creds
+#   docker compose up website                             # serve site on :8080
+
+services:
+
+  # ── CardTone Kid App (Flutter) ───────────────────────────────────────────────
+  kid:
+    build:
+      context: .
+      dockerfile: Dockerfile.flutter
+    image: cardtone-flutter
+    working_dir: /workspace
+    volumes:
+      - ./cardtone-kid:/workspace          # app source
+      - pub-cache:/root/.pub-cache         # Dart package cache
+      - gradle-cache:/root/.gradle         # Gradle build cache
+    env_file:
+      - path: .env
+        required: false                    # OK if .env doesn't exist yet
+    environment:
+      # Passed to flutter build via --dart-define (see build_release.ps1)
+      - SUPABASE_URL
+      - SUPABASE_ANON_KEY
+    # Default: show flutter info. Override per-run: docker compose run kid flutter test
+    command: flutter doctor -v
+    stdin_open: true
+    tty: true
+
+  # ── CardTone Parent App (Flutter) ────────────────────────────────────────────
+  parent:
+    build:
+      context: .
+      dockerfile: Dockerfile.flutter
+    image: cardtone-flutter          # reuses the same built image
+    working_dir: /workspace
+    volumes:
+      - ./cardtone-parent:/workspace
+      - pub-cache:/root/.pub-cache
+      - gradle-cache:/root/.gradle
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - SUPABASE_URL
+      - SUPABASE_ANON_KEY
+    command: flutter doctor -v
+    stdin_open: true
+    tty: true
+
+  # ── CardTone Website (static, served by nginx) ───────────────────────────────
+  website:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./cardtone-website:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+# ── Named volumes (persist between runs) ────────────────────────────────────────
+volumes:
+  pub-cache:       # ~/.pub-cache  — Dart packages
+  gradle-cache:    # ~/.gradle     — Gradle dependencies
