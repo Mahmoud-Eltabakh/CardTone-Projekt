@@ -1,5 +1,9 @@
 # Contributing to CardTone
 
+<p align="center">
+  <img src="assets/logo-shared.svg" width="120" alt="CardTone Logo"/>
+</p>
+
 Thank you for your interest in CardTone! This guide covers everything you need to go from zero to submitting your first pull request.
 
 ---
