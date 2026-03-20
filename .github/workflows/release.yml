@@ -1,0 +1,169 @@
+# Triggered by pushing a version tag, e.g.: git tag v1.2.0 && git push origin v1.2.0
+#
+# Required repository secrets:
+#   SUPABASE_URL           — your Supabase project URL
+#   SUPABASE_ANON_KEY      — your Supabase anon key
+#   KEYSTORE_BASE64        — base64-encoded upload keystore (both apps share one keystore)
+#   STORE_PASSWORD         — keystore store password
+#   KEY_ALIAS              — key alias inside the keystore
+#   KEY_PASSWORD           — key password
+#   WEBSITE_DEPLOY_TOKEN   — GitHub PAT with `contents: write` on CardTone-Website repo
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  # ── 1. Build both APKs in parallel ─────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.apk_name }} APK
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - app: kid
+            apk_name: CardTone-Kid
+          - app: parent
+            apk_name: CardTone-Parent
+
+    steps:
+      - name: Checkout repo with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode \
+            > cardtone-${{ matrix.app }}/android/app/upload-keystore.jks
+
+      - name: Write key.properties
+        run: |
+          {
+            echo "storePassword=${{ secrets.STORE_PASSWORD }}"
+            echo "keyPassword=${{ secrets.KEY_PASSWORD }}"
+            echo "keyAlias=${{ secrets.KEY_ALIAS }}"
+            echo "storeFile=upload-keystore.jks"
+          } > cardtone-${{ matrix.app }}/android/key.properties
+
+      - name: Install Flutter dependencies
+        working-directory: cardtone-${{ matrix.app }}
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: cardtone-${{ matrix.app }}
+        run: |
+          flutter build apk --release \
+            --dart-define="SUPABASE_URL=${{ secrets.SUPABASE_URL }}" \
+            --dart-define="SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}"
+
+      - name: Stage APK for upload
+        run: |
+          cp cardtone-${{ matrix.app }}/build/app/outputs/flutter-apk/app-release.apk \
+            ${{ matrix.apk_name }}.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.apk_name }}
+          path: ${{ matrix.apk_name }}.apk
+          retention-days: 1
+
+  # ── 2. Create GitHub Release and attach APKs ───────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: apks/
+
+      - name: Create release and upload APKs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "CardTone ${{ github.ref_name }}" \
+            --generate-notes \
+            apks/CardTone-Kid.apk \
+            apks/CardTone-Parent.apk
+
+  # ── 3. Update website download links ───────────────────────────────────────
+  update-website:
+    name: Update website download links
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout CardTone-Website
+        uses: actions/checkout@v4
+        with:
+          repository: Mahmoud-Eltabakh/CardTone-Website
+          token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
+          path: website
+
+      - name: Replace version in download URLs
+        run: |
+          VERSION="${{ github.ref_name }}"
+          # Replaces any previous vX.Y.Z tag in the GitHub release download URLs
+          sed -i \
+            "s|/releases/download/v[0-9][0-9.]*\/|/releases/download/${VERSION}/|g" \
+            website/index.html \
+            website/ar.html
+
+      - name: Commit and push to website repo
+        run: |
+          cd website
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html ar.html
+          # Only commit if something actually changed
+          git diff --cached --quiet && echo "No URL changes needed." && exit 0
+          git commit -m "Update download links to ${{ github.ref_name }}"
+          git push
+
+      - name: Bump website submodule pointer in monorepo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the new HEAD SHA from the website repo we just pushed
+          NEW_SHA=$(git -C website rev-parse HEAD)
+
+          # Checkout the monorepo on the default branch and update the submodule ref
+          git clone \
+            --depth 1 \
+            --branch main \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            monorepo
+
+          cd monorepo
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Point the submodule to the new commit
+          git update-index --cacheinfo 160000,"$NEW_SHA",cardtone-website
+          git commit -m "chore: bump cardtone-website to ${{ github.ref_name }}"
+          git push
